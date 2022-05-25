@@ -18,6 +18,7 @@ use Magento\Store\Api\Data\StoreInterface;
 use Magento\Tax\Model\Calculation as TaxCalculation;
 use Magmodules\Channable\Api\Config\RepositoryInterface as ConfigProvider;
 use Magmodules\Channable\Exceptions\CouldNotImportOrder;
+use Magento\Framework\App\ResourceConnection;
 
 /**
  * Add items to quote
@@ -58,11 +59,16 @@ class Add
     private $taxCalculation;
 
     /**
-     * Add constructor.
+     * @var ResourceConnection
+     */
+    private $resourceConnection;
+
+    /**
      * @param ConfigProvider $configProvider
      * @param ProductRepositoryInterface $productRepository
      * @param StockRegistryInterface $stockRegistry
      * @param CheckoutSession $checkoutSession
+     * @param ResourceConnection $resourceConnection
      * @param TaxCalculation $taxCalculation
      */
     public function __construct(
@@ -70,12 +76,14 @@ class Add
         ProductRepositoryInterface $productRepository,
         StockRegistryInterface $stockRegistry,
         CheckoutSession $checkoutSession,
+        ResourceConnection $resourceConnection,
         TaxCalculation $taxCalculation
     ) {
         $this->configProvider = $configProvider;
         $this->productRepository = $productRepository;
         $this->stockRegistry = $stockRegistry;
         $this->checkoutSession = $checkoutSession;
+        $this->resourceConnection = $resourceConnection;
         $this->taxCalculation = $taxCalculation;
     }
 
@@ -155,7 +163,36 @@ class Add
             $price = ($item['price'] / (100 + $percent) * 100);
         }
 
-        return $price;
+        return $price - $this->getProductWeeTax($product, $quote);
+    }
+
+    /**
+     * Get Product Wee Tax (FPT)
+     *
+     * @param ProductInterface $product
+     * @param Quote $quote
+     * @return float
+     */
+    private function getProductWeeTax(ProductInterface $product, Quote $quote): float
+    {
+        if (!$this->configProvider->deductFptTax($quote->getStoreId())) {
+            return 0;
+        }
+
+        $connection = $this->resourceConnection->getConnection();
+        $tableName = $this->resourceConnection->getTableName('weee_tax');
+
+        if (!$connection->isTableExists($tableName)) {
+            return 0;
+        }
+
+        $select = $connection->select()
+            ->from($tableName, 'value')
+            ->where('entity_id = ?', $product->getId())
+            ->where('country = ?', $quote->getBillingAddress()->getCountryId())
+            ->limit(1);
+
+        return (float)$connection->fetchOne($select);
     }
 
     /**
